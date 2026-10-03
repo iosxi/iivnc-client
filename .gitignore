@@ -1,0 +1,7 @@
+/build/
+release-notes.md
+*.log
+iivnc-client.ini
+iivnc-client.ini.tmp
+*-v*.exe
+__pycache__/
