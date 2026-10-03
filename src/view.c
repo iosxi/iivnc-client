@@ -11,6 +11,8 @@
  *   - 全画面のとき(ini の grab=always なら いつも)は低レベルのキーボード
  *     フックで Windows キーや Alt+Tab も相手へ送る。
  *   - Ctrl+Alt+Enter で全画面の切り替え、F8 でメニュー(どちらも相手へは送らない)。
+ *   - 全画面のときに画面の上端へマウスを当てると、帯(窓に戻す・メニュー・最小化・切断)が出る。
+ *     キーを横取りしている間でも、マウスで必ず抜けられるようにするため。
  *   - 窓が手前でなくなったら、押したままのキー・ボタンを離したことにする。
  *
  *  カーソルは相手から形をもらい、こちらで描く(表示の倍率に合わせて縮める)。
@@ -23,12 +25,18 @@
 #include <imm.h>
 #include <shellapi.h>
 #include <dwmapi.h>
+#include <uxtheme.h>
 #include "shader_vs.h"
 #include "shader_ps.h"
 
 #define VIEW_CLASS   L"iivnc.Client.View"
 #define TIMER_STATS  1
 #define TIMER_IDLE   2
+#define TIMER_BAR    3                  /* 上端に当て続けたら帯を出す */
+#define TIMER_BARHIDE 4                 /* 帯から離れたら消す */
+#define BAR_CLASS    L"iivnc.Client.Bar"
+
+enum { IDB_RESTORE = 0x180, IDB_MENU, IDB_MIN, IDB_CLOSE };
 
 enum {
     IDM_FULLSCREEN = 0x100, IDM_FIT, IDM_ACTUAL, IDM_Q_HIGH, IDM_Q_LOSSLESS, IDM_Q_NORMAL, IDM_Q_LOW,
@@ -70,6 +78,9 @@ static HCURSOR  g_remoteCursor, g_dotCursor;
 static int      g_cursorVer = -1;
 static double   g_cursorScale;
 static DWORD    g_lastLocalMove;
+static HWND     g_bar;                  /* 全画面のときの帯 */
+static HFONT    g_barFont;
+static HBRUSH   g_barBrush;
 static int      g_lastRX, g_lastRY;     /* 最後に送ったポインタの位置 */
 
 /* 統計と検証 */
@@ -378,8 +389,9 @@ static LRESULT CALLBACK ll_keyboard(int code, WPARAM wp, LPARAM lp)
 {
     if (code == HC_ACTION && GetForegroundWindow() == g_view && want_grab()) {
         const KBDLLHOOKSTRUCT *k = (const KBDLLHOOKSTRUCT *)lp;
-        if (!(k->flags & LLKHF_INJECTED)) {
+        if (!(k->flags & LLKHF_INJECTED) || g_hookTest) {
             BOOL down = wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN;
+            if (g_hookTest) log_printf(L"[hook] vk=%02X scan=%02X flags=%02X %s", k->vkCode, k->scanCode, k->flags, down ? L"down" : L"up");
             key_event(k->vkCode, k->scanCode, (k->flags & LLKHF_EXTENDED) != 0, down);
             return 1;
         }
@@ -392,6 +404,109 @@ static void update_hook(void)
     BOOL want = want_grab() && GetForegroundWindow() == g_view;
     if (want && !g_hook) g_hook = SetWindowsHookExW(WH_KEYBOARD_LL, ll_keyboard, g_inst, 0);
     else if (!want && g_hook) { UnhookWindowsHookEx(g_hook); g_hook = NULL; }
+}
+
+/* ------------------------------------------------------------------ */
+/*  全画面のときの帯                                                    */
+/* ------------------------------------------------------------------ */
+
+static void show_menu(int x, int y);
+
+static LRESULT CALLBACK bar_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_COMMAND:
+        switch (LOWORD(wp)) {
+        case IDB_RESTORE: ShowWindow(h, SW_HIDE); if (g_full) view_toggle_fullscreen(); break;
+        case IDB_MENU: {
+            RECT r;
+            GetWindowRect(h, &r);
+            show_menu(r.left, r.bottom);
+            break;
+        }
+        case IDB_MIN:   ShowWindow(h, SW_HIDE); ShowWindow(g_view, SW_MINIMIZE); break;
+        case IDB_CLOSE: PostMessageW(g_view, WM_CLOSE, 0, 0); break;
+        }
+        return 0;
+    case WM_ERASEBKGND: {
+        RECT r;
+        GetClientRect(h, &r);
+        FillRect((HDC)wp, &r, g_barBrush);
+        return 1;
+    }
+    case WM_CTLCOLORBTN:
+        return (LRESULT)g_barBrush;
+    case WM_MOUSEACTIVATE:
+        return MA_NOACTIVATE;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+static void bar_show(BOOL show)
+{
+    static const struct { int id; const WCHAR *text; int w; } k_btn[] = {
+        { IDB_RESTORE, L"窓に戻す (Ctrl+Alt+Enter)", 190 }, { IDB_MENU, L"メニュー (F8)", 120 },
+        { IDB_MIN, L"最小化", 80 }, { IDB_CLOSE, L"切断", 80 },
+    };
+    MONITORINFO mi;
+    UINT dpi;
+    int  i, x, total = 0, pad, bh;
+
+    if (!show) {
+        if (g_bar) ShowWindow(g_bar, SW_HIDE);
+        KillTimer(g_view, TIMER_BARHIDE);
+        return;
+    }
+    dpi = GetDpiForWindow(g_view);
+    pad = MulDiv(6, (int)dpi, 96);
+    bh = MulDiv(30, (int)dpi, 96);
+    if (!g_bar) {
+        WNDCLASSW wc;
+        LOGFONTW  lf;
+        ZeroMemory(&wc, sizeof(wc));
+        wc.lpfnWndProc = bar_proc;
+        wc.hInstance = g_inst;
+        wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+        wc.lpszClassName = BAR_CLASS;
+        RegisterClassW(&wc);
+        g_barBrush = CreateSolidBrush(RGB(43, 43, 43));
+        g_bar = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, BAR_CLASS, L"", WS_POPUP,
+                                0, 0, 10, 10, g_view, NULL, g_inst, NULL);
+        SystemParametersInfoForDpi(SPI_GETICONTITLELOGFONT, sizeof(lf), &lf, 0, dpi);
+        g_barFont = CreateFontIndirectW(&lf);
+        for (i = 0; i < (int)ARRAYSIZE(k_btn); i++) {
+            HWND b = CreateWindowExW(0, L"BUTTON", k_btn[i].text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                     0, 0, 10, 10, g_bar, (HMENU)(INT_PTR)k_btn[i].id, g_inst, NULL);
+            SendMessageW(b, WM_SETFONT, (WPARAM)g_barFont, FALSE);
+            SetWindowTheme(b, L"DarkMode_Explorer", NULL);
+        }
+    }
+    for (i = 0; i < (int)ARRAYSIZE(k_btn); i++) total += MulDiv(k_btn[i].w, (int)dpi, 96) + pad;
+    total += pad;
+    x = pad;
+    for (i = 0; i < (int)ARRAYSIZE(k_btn); i++) {
+        int w = MulDiv(k_btn[i].w, (int)dpi, 96);
+        SetWindowPos(GetDlgItem(g_bar, k_btn[i].id), NULL, x, pad / 2, w, bh - pad, SWP_NOZORDER | SWP_NOACTIVATE);
+        x += w + pad;
+    }
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfoW(MonitorFromWindow(g_view, MONITOR_DEFAULTTONEAREST), &mi);
+    SetWindowPos(g_bar, HWND_TOPMOST, mi.rcMonitor.left + (mi.rcMonitor.right - mi.rcMonitor.left - total) / 2,
+                 mi.rcMonitor.top, total, bh, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    SetTimer(g_view, TIMER_BARHIDE, 300, NULL);
+    log_printf(L"全画面の帯を出した");
+}
+
+/* 帯から離れたら消す */
+static void bar_check_hide(void)
+{
+    RECT  r;
+    POINT p;
+    if (!g_bar || !IsWindowVisible(g_bar)) { KillTimer(g_view, TIMER_BARHIDE); return; }
+    GetWindowRect(g_bar, &r);
+    InflateRect(&r, 0, (r.bottom - r.top) / 2);
+    GetCursorPos(&p);
+    if (!PtInRect(&r, p) && !g_hookTest) bar_show(FALSE);
 }
 
 void view_toggle_fullscreen(void)
@@ -410,6 +525,7 @@ void view_toggle_fullscreen(void)
                      mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     } else {
         g_full = FALSE;
+        bar_show(FALSE);
         SetWindowLongW(g_view, GWL_STYLE, g_stylePrev);
         SetWindowPlacement(g_view, &g_wpPrev);
         SetWindowPos(g_view, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
@@ -478,6 +594,10 @@ static void key_event(UINT vk, UINT scan, BOOL ext, BOOL down)
     if (vk == VK_CAPITAL || vk == VK_NUMLOCK) g_keys[vk] = (BYTE)((GetKeyState((int)vk) & 1) | (down ? 0x80 : 0));
 
     /* こちらで使うキー */
+    if (down && vk == VK_RETURN)
+        log_printf(L"Enter: Ctrl %d(左 %d 右 %d)、Alt %d(左 %d 右 %d)、全画面 %d", g_keys[VK_CONTROL] >> 7,
+                   g_keys[VK_LCONTROL] >> 7, g_keys[VK_RCONTROL] >> 7, g_keys[VK_MENU] >> 7, g_keys[VK_LMENU] >> 7,
+                   g_keys[VK_RMENU] >> 7, g_full);
     if (down && vk == VK_RETURN && (g_keys[VK_CONTROL] & 0x80) && (g_keys[VK_MENU] & 0x80)) {
         view_release_keys();
         view_toggle_fullscreen();
@@ -965,7 +1085,15 @@ static LRESULT CALLBACK view_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_TIMER:
-        if (wp == TIMER_STATS) stats_tick();
+        if (wp == TIMER_BAR) {
+            POINT p;
+            RECT  r;
+            KillTimer(hwnd, TIMER_BAR);
+            GetCursorPos(&p);
+            GetWindowRect(hwnd, &r);
+            if (g_full && (p.y <= r.top + 1 || g_hookTest)) bar_show(TRUE);    /* 検証では実際のカーソルを見ない */
+        } else if (wp == TIMER_BARHIDE) bar_check_hide();
+        else if (wp == TIMER_STATS) stats_tick();
         else if (wp == TIMER_IDLE && g_rm.updates > 0 && GetTickCount() - g_lastFrameTick >= (DWORD)g_idleExitMs) {
             KillTimer(hwnd, TIMER_IDLE);
             finish_test();
@@ -1031,6 +1159,8 @@ static LRESULT CALLBACK view_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_MOUSEMOVE:
         g_lastLocalMove = GetTickCount();
         pointer(lp);
+        /* 全画面で上端に当てたら、少し待って帯を出す */
+        if (g_full && (short)HIWORD(lp) <= 1 && !(g_bar && IsWindowVisible(g_bar))) SetTimer(hwnd, TIMER_BAR, 250, NULL);
         return 0;
 
     case WM_LBUTTONDOWN: case WM_MBUTTONDOWN: case WM_RBUTTONDOWN: case WM_XBUTTONDOWN:

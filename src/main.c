@@ -26,6 +26,7 @@ WCHAR      g_dumpPath[MAX_PATH];
 int        g_exitAfter;
 int        g_idleExitMs;
 int        g_forceEnc = -1;
+BOOL       g_hookTest;
 
 static BOOL g_everConnected;
 
@@ -124,6 +125,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
             else if (!lstrcmpiW(a, L"dump") && i + 1 < argc) GetFullPathNameW(argv[++i], MAX_PATH, g_dumpPath, NULL);
             else if (!lstrcmpiW(a, L"exitafter") && i + 1 < argc) g_exitAfter = _wtoi(argv[++i]);
             else if (!lstrcmpiW(a, L"idleexit") && i + 1 < argc) g_idleExitMs = _wtoi(argv[++i]);
+            else if (!lstrcmpiW(a, L"hooktest")) g_hookTest = TRUE;
             else if (!lstrcmpiW(a, L"encoding") && i + 1 < argc) {
                 const WCHAR *e = argv[++i];
                 g_forceEnc = !lstrcmpiW(e, L"raw") ? 0 : !lstrcmpiW(e, L"rre") ? 2 : !lstrcmpiW(e, L"hextile") ? 5 :
