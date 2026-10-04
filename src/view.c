@@ -2,7 +2,10 @@
  * view.c - 相手の画面を出す窓
  *
  *  描画は D3D11(フリップ モデルのスワップ チェーン)。変わった範囲だけを
- *  GPU のテクスチャへ写し、拡大縮小は GPU で行う。縮めるときはミップ
+ *  GPU のテクスチャへ写し、拡大縮小は GPU で行う。写すときは自前の
+ *  1024×1024 の STAGING テクスチャ 1 枚を経由し、大きな範囲はタイルに分けて送る
+ *  (UpdateSubresource はドライバが送り出し用の領域を毎回用意し、絵が途切れなく
+ *  届くと 4K で 200MB 近くまで溜まった。2026-10-04 実測)。縮めるときはミップ
  *  マップを作って三線形で引く。D3D11 が使えなければ GDI(StretchDIBits)。
  *
  *  入力
@@ -51,6 +54,9 @@ static ID3D11DeviceContext      *g_ctx;
 static IDXGISwapChain1          *g_sc;
 static ID3D11RenderTargetView   *g_rtv;
 static ID3D11Texture2D          *g_tex;
+static ID3D11Texture2D          *g_stage[2];   /* CPU から書く送り出し用(STAGE_SIZE 四方、交互に使う) */
+static int                       g_stageNext;
+#define STAGE_SIZE 1024
 static ID3D11ShaderResourceView *g_srv;
 static ID3D11VertexShader       *g_vs;
 static ID3D11PixelShader        *g_ps;
@@ -112,6 +118,8 @@ static void d3d_release(void)
     d3d_release_target();
     SAFE_RELEASE(g_srv, ID3D11ShaderResourceView);
     SAFE_RELEASE(g_tex, ID3D11Texture2D);
+    SAFE_RELEASE(g_stage[0], ID3D11Texture2D);
+    SAFE_RELEASE(g_stage[1], ID3D11Texture2D);
     SAFE_RELEASE(g_sampLinear, ID3D11SamplerState);
     SAFE_RELEASE(g_sampPoint, ID3D11SamplerState);
     SAFE_RELEASE(g_vs, ID3D11VertexShader);
@@ -135,11 +143,18 @@ static BOOL d3d_init(HWND hwnd)
     HRESULT hr;
 
     if (g_d3d) return TRUE;
-    if (g_d3dFailed) return FALSE;
+    if (g_d3dFailed || g_forceGdi || g_cfg.renderGdi) return FALSE;
     hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_BGRA_SUPPORT, want, ARRAYSIZE(want),
                            D3D11_SDK_VERSION, &g_dev, &fl, &g_ctx);
     if (FAILED(hr)) goto fail;
     if (FAILED(ID3D11Device_QueryInterface(g_dev, &IID_IDXGIDevice, (void **)&dd))) goto fail;
+    {
+        IDXGIDevice1 *d1 = NULL;
+        if (SUCCEEDED(IDXGIDevice_QueryInterface(dd, &IID_IDXGIDevice1, (void **)&d1))) {
+            IDXGIDevice1_SetMaximumFrameLatency(d1, 1);     /* GPU に溜める描画は 1 つまで(遅れとメモリを減らす) */
+            IDXGIDevice1_Release(d1);
+        }
+    }
     IDXGIDevice_GetAdapter(dd, &ad);
     IDXGIAdapter_GetParent(ad, &IID_IDXGIFactory2, (void **)&fac);
     if (!fac) goto fail;
@@ -191,6 +206,8 @@ static BOOL d3d_texture(int w, int h)
     if (g_tex && g_texW == w && g_texH == h) return TRUE;
     SAFE_RELEASE(g_srv, ID3D11ShaderResourceView);
     SAFE_RELEASE(g_tex, ID3D11Texture2D);
+    SAFE_RELEASE(g_stage[0], ID3D11Texture2D);
+    SAFE_RELEASE(g_stage[1], ID3D11Texture2D);
     ZeroMemory(&td, sizeof(td));
     td.Width = (UINT)w;
     td.Height = (UINT)h;
@@ -206,6 +223,15 @@ static BOOL d3d_texture(int w, int h)
         SAFE_RELEASE(g_tex, ID3D11Texture2D);
         return FALSE;
     }
+    td.Width = (UINT)min(w, STAGE_SIZE);
+    td.Height = (UINT)min(h, STAGE_SIZE);
+    td.MipLevels = 1;
+    td.Usage = D3D11_USAGE_STAGING;
+    td.BindFlags = 0;
+    td.MiscFlags = 0;
+    td.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(ID3D11Device_CreateTexture2D(g_dev, &td, NULL, &g_stage[0]))) g_stage[0] = NULL;
+    if (FAILED(ID3D11Device_CreateTexture2D(g_dev, &td, NULL, &g_stage[1]))) g_stage[1] = NULL;
     g_texW = w;
     g_texH = h;
     return TRUE;
@@ -259,21 +285,36 @@ static void d3d_draw(void)
 /* 変わった範囲をテクスチャへ */
 static void d3d_upload(RECT r)
 {
-    D3D11_BOX box;
+    RECT all;
+    int  tx, ty, w, h;
     if (!g_d3d) return;
     AcquireSRWLockShared(&g_rm.lock);
-    if (d3d_texture(g_rm.w, g_rm.h)) {
-        RECT all;
-        SetRect(&all, 0, 0, g_rm.w, g_rm.h);
-        IntersectRect(&r, &r, &all);
-        if (!IsRectEmpty(&r)) {
-            box.left = (UINT)r.left; box.top = (UINT)r.top; box.front = 0;
-            box.right = (UINT)r.right; box.bottom = (UINT)r.bottom; box.back = 1;
-            ID3D11DeviceContext_UpdateSubresource(g_ctx, (ID3D11Resource *)g_tex, 0, &box,
-                                                  g_rm.fb + ((size_t)r.top * g_rm.w + r.left) * 4, (UINT)g_rm.w * 4, 0);
-        }
-    }
+    w = g_rm.w;
+    h = g_rm.h;
     ReleaseSRWLockShared(&g_rm.lock);
+    if (!d3d_texture(w, h)) return;
+    SetRect(&all, 0, 0, w, h);
+    IntersectRect(&r, &r, &all);
+    /* 送り出し領域の大きさのタイルに分け、2 枚を交互に使って送る。
+       GPU を待つ Map の間は画面の写しの鍵を持たない(復号のスレッドを止めない) */
+    for (ty = r.top; ty < r.bottom; ty += STAGE_SIZE)
+        for (tx = r.left; tx < r.right; tx += STAGE_SIZE) {
+            int tw = min(STAGE_SIZE, (int)r.right - tx), th = min(STAGE_SIZE, (int)r.bottom - ty), y;
+            ID3D11Texture2D *st = g_stage[g_stageNext];
+            D3D11_MAPPED_SUBRESOURCE m;
+            D3D11_BOX box;
+            g_stageNext ^= 1;
+            if (!st || FAILED(ID3D11DeviceContext_Map(g_ctx, (ID3D11Resource *)st, 0, D3D11_MAP_WRITE, 0, &m))) continue;
+            AcquireSRWLockShared(&g_rm.lock);
+            if (g_rm.w == w && g_rm.h == h)
+                for (y = 0; y < th; y++)
+                    memcpy((BYTE *)m.pData + (size_t)y * m.RowPitch, g_rm.fb + ((size_t)(ty + y) * w + tx) * 4, (size_t)tw * 4);
+            ReleaseSRWLockShared(&g_rm.lock);
+            ID3D11DeviceContext_Unmap(g_ctx, (ID3D11Resource *)st, 0);
+            box.left = 0; box.top = 0; box.front = 0; box.right = (UINT)tw; box.bottom = (UINT)th; box.back = 1;
+            ID3D11DeviceContext_CopySubresourceRegion(g_ctx, (ID3D11Resource *)g_tex, 0, (UINT)tx, (UINT)ty, 0,
+                                                      (ID3D11Resource *)st, 0, &box);
+        }
     if (g_scale < 1.0 && g_srv) ID3D11DeviceContext_GenerateMips(g_ctx, g_srv);
 }
 

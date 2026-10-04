@@ -100,9 +100,12 @@ def main():
     absx = ((2 * 960 + 1) * 65536) // (2 * 1920)
     absy = ((2 * 540 + 1) * 65536) // (2 * 1080)
     want = f'mouse flags=C001 dx={absx} dy={absy} data=0'
-    print(f'  窓 {cw}x{ch} の中心 → {mouse[:1]}')
-    good = bool(mouse) and abs(int(mouse[0].split('dx=')[1].split()[0]) - absx) <= 40 and \
-        abs(int(mouse[0].split('dy=')[1].split()[0]) - absy) <= 70 and \
+    # 押す直前の移動を見る(本物のマウスカーソルが窓に重なっていると、その位置の移動も先に届くため)
+    down = next((i for i, m in enumerate(mouse) if 'flags=0002' in m), len(mouse))
+    move = [m for m in mouse[:down] if 'flags=C001' in m][-1:]
+    print(f'  窓 {cw}x{ch} の中心 → {move}')
+    good = bool(move) and abs(int(move[0].split('dx=')[1].split()[0]) - absx) <= 40 and \
+        abs(int(move[0].split('dy=')[1].split()[0]) - absy) <= 70 and \
         any('flags=0002' in m for m in mouse) and any('flags=0004' in m for m in mouse)
     ok &= good
     print(f'  {"OK" if good else "NG"}  マウス(中心へ移動・左クリック。期待 {want} 付近)')
