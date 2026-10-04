@@ -1321,8 +1321,10 @@ static LRESULT CALLBACK view_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if ((wp & 0xFFF0) == SC_KEYMENU) return 0;      /* Alt で窓のメニューへ行かない */
         break;
 
-    case WM_INITMENU:
-        if ((HMENU)wp == GetSystemMenu(hwnd, FALSE)) update_checks((HMENU)wp);
+    case WM_INITMENUPOPUP:
+        /* 窓のシステム メニューを開くとき、チェックを今の状態に合わせる。
+           WM_INITMENU の wParam は GetSystemMenu とは別のハンドル(外側の入れ物)なので使えない */
+        if (HIWORD(lp)) update_checks((HMENU)wp);
         break;
 
     case WM_COMMAND:
