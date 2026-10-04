@@ -9,6 +9,8 @@
  *  -fullscreen      全画面で開く        -quality high|lossless|normal|low
  *  -ini <path>      別の設定ファイル    -log         ログを書く
  *  -render gdi|gpu  描画の方式(-gdi・-gpu とも書ける)
+ *  -remove-firewall 管理者で: ファイアウォールの、この exe の規則を消す(接続の画面のボタンから呼ぶ。
+ *                   終了コードは消した数、-1 = 失敗)
  *
  *  検証用:
  *  -dump <file.bmp> 終わるときに受け取った絵を BMP に書く
@@ -98,7 +100,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
     MSG     msg;
     WCHAR   hostArg[256] = L"";
     char    pwArg[9] = { 0 };
-    BOOL    havePw = FALSE, logArg = FALSE, viewArg = FALSE, fullArg = FALSE;
+    BOOL    havePw = FALSE, logArg = FALSE, viewArg = FALSE, fullArg = FALSE, fwRemove = FALSE;
     int     qualityArg = -1, renderArg = -1;  /* renderArg: 1 = GDI、0 = GPU */
     INITCOMMONCONTROLSEX icc;
 
@@ -127,6 +129,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
             else if (!lstrcmpiW(a, L"exitafter") && i + 1 < argc) g_exitAfter = _wtoi(argv[++i]);
             else if (!lstrcmpiW(a, L"idleexit") && i + 1 < argc) g_idleExitMs = _wtoi(argv[++i]);
             else if (!lstrcmpiW(a, L"hooktest")) g_hookTest = TRUE;
+            else if (!lstrcmpiW(a, L"remove-firewall")) fwRemove = TRUE;
             else if (!lstrcmpiW(a, L"gdi")) renderArg = 1;
             else if (!lstrcmpiW(a, L"gpu")) renderArg = 0;
             else if (!lstrcmpiW(a, L"render") && i + 1 < argc) renderArg = lstrcmpiW(argv[++i], L"gpu") != 0;
@@ -145,6 +148,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
     config_load();
     if (logArg) g_cfg.log = TRUE;
     log_open();
+    if (fwRemove) return fw_remove(NULL);
     theme_init();
     icc.dwSize = sizeof(icc);
     icc.dwICC = ICC_STANDARD_CLASSES;

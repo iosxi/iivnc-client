@@ -33,6 +33,7 @@ BEGIN
     AUTOCHECKBOX    "全画面で開く(&F)", IDC_FULLSCREEN, 84, 127, 184, 10
     LTEXT           "", IDC_ERROR, 12, 144, 256, 36, SS_NOPREFIX
 
+    PUSHBUTTON      "", IDC_FWREMOVE, 12, 188, 136, 14
     DEFPUSHBUTTON   "接続(&O)", IDOK, 156, 188, 54, 14
     PUSHBUTTON      "キャンセル", IDCANCEL, 214, 188, 54, 14
 END
@@ -41,8 +42,8 @@ END
 //  版
 // ------------------------------------------------------------------
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1, 4, 0, 0
-PRODUCTVERSION  1, 4, 0, 0
+FILEVERSION     1, 5, 0, 0
+PRODUCTVERSION  1, 5, 0, 0
 FILEOS          VOS_NT_WINDOWS32
 FILETYPE        VFT_APP
 BEGIN
@@ -52,11 +53,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "iosxi"
             VALUE "FileDescription",  "iivnc-client (VNC ビューア)"
-            VALUE "FileVersion",      "1.4.0"
+            VALUE "FileVersion",      "1.5.0"
             VALUE "InternalName",     "iivnc-client"
             VALUE "OriginalFilename", "iivnc-client.exe"
             VALUE "ProductName",      "iivnc"
-            VALUE "ProductVersion",   "1.4.0"
+            VALUE "ProductVersion",   "1.5.0"
         END
     END
     BLOCK "VarFileInfo"

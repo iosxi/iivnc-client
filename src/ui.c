@@ -4,12 +4,16 @@
  *  サーバーの欄は前に使った接続先を覚えている(最大 16 件)。
  *  「パスワードを覚える」にすると、ini に隠して置く(ほかの VNC と同じ形)。
  *  接続先を選び直すと、覚えたパスワードを入れ直す。
+ *
+ *  左下の「ネットワークの許可を消す」: Windows ファイアウォールに、この exe の規則が
+ *  あれば消す(管理者で。fwrules.c)。無ければ「ネットワークの許可: なし」で押せない。
  * ================================================================== */
 
 #include "iivncc.h"
 #include "resource.h"
 
 static const WCHAR *g_error;
+static BOOL  g_info;            /* IDC_ERROR に出しているのがお知らせ(赤くしない) */
 static HFONT g_heading;
 static int   g_footerTop;
 
@@ -54,6 +58,28 @@ static void load_saved_password(HWND dlg)
         SetDlgItemTextW(dlg, IDC_PASSWORD, L"");
         CheckDlgButton(dlg, IDC_SAVEPW, BST_UNCHECKED);
     }
+}
+
+static void fw_refresh(HWND dlg)
+{
+    FwInfo fi;
+    HWND   b = GetDlgItem(dlg, IDC_FWREMOVE);
+    BOOL   any = fw_query(NULL, &fi) && fi.count > 0;
+    SetWindowTextW(b, any ? L"ネットワークの許可を消す(&N)..." : L"ネットワークの許可: なし");
+    EnableWindow(b, any);
+}
+
+static void fw_remove_now(HWND dlg)
+{
+    WCHAR s[200];
+    int   n = fw_remove_elevated(dlg, NULL, L"-remove-firewall");
+    if (n < 0) lstrcpyW(s, L"ネットワークの許可を消せませんでした(管理者の確認を断ったか、失敗しました)。");
+    else swprintf(s, ARRAYSIZE(s), L"Windows ファイアウォールから、この exe の許可設定を %d 件消しました。", n);
+    g_info = TRUE;
+    SetDlgItemTextW(dlg, IDC_ERROR, s);
+    ShowWindow(GetDlgItem(dlg, IDC_ERROR), SW_SHOW);
+    fw_refresh(dlg);
+    if (!IsWindowEnabled(GetFocus())) SetFocus(GetDlgItem(dlg, IDOK));
 }
 
 static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
@@ -101,6 +127,8 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         SendDlgItemMessageW(dlg, IDC_RENDER, CB_SETCURSEL, g_cfg.renderGdi ? 0 : 1, 0);
         CheckDlgButton(dlg, IDC_VIEWONLY, g_cfg.viewOnly ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dlg, IDC_FULLSCREEN, g_cfg.fullscreen ? BST_CHECKED : BST_UNCHECKED);
+        fw_refresh(dlg);
+        g_info = FALSE;
         if (g_error) {
             SetDlgItemTextW(dlg, IDC_ERROR, g_error);
             ShowWindow(GetDlgItem(dlg, IDC_ERROR), SW_SHOW);
@@ -142,7 +170,7 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CTLCOLORLISTBOX: {
         int id = GetDlgCtrlID((HWND)lp);
         LRESULT r;
-        if (msg == WM_CTLCOLORSTATIC && id == IDC_ERROR) {
+        if (msg == WM_CTLCOLORSTATIC && id == IDC_ERROR && !g_info) {
             theme_ctlcolor(msg, (HDC)wp, (HWND)lp, FALSE);
             SetTextColor((HDC)wp, theme_is_dark() ? RGB(255, 153, 164) : RGB(196, 43, 28));
             return (INT_PTR)theme_back_brush();
@@ -177,6 +205,7 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
             int   port;
             GetDlgItemTextW(dlg, IDC_HOST, host, ARRAYSIZE(host));
             if (!conn_parse_host(host, h2, ARRAYSIZE(h2), &port)) {
+                g_info = FALSE;
                 SetDlgItemTextW(dlg, IDC_ERROR, L"サーバーを入れてください。例: 192.168.1.10、pc-name:1、host::5901");
                 ShowWindow(GetDlgItem(dlg, IDC_ERROR), SW_SHOW);
                 SetFocus(GetDlgItem(dlg, IDC_HOST));
@@ -197,6 +226,10 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
             config_set_password(host, g_cfg.savePassword ? g_cfg.password : "");
             config_save();
             EndDialog(dlg, IDOK);
+            return TRUE;
+        }
+        if (LOWORD(wp) == IDC_FWREMOVE) {
+            fw_remove_now(dlg);
             return TRUE;
         }
         if (LOWORD(wp) == IDCANCEL) {

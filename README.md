@@ -79,6 +79,17 @@ Windows 10 / 11 用の VNC ビューアです。ほかの PC の画面を見た�
   隠しているだけで、守られてはいません。
 - Ctrl+Alt+Del はキーで押しても相手へは行きません(Windows が先に取る)。メニューの「Ctrl+Alt+Del を送る」を使ってください。
 
+## ネットワークの許可と、ini のほかに PC に残るもの
+
+iivnc-client は自分からつなぎに行くだけで待ち受けないので、ふつうは Windows の「ネットワークへのアクセスを
+許可しますか」は出ません。それでも Windows ファイアウォールにこの exe の規則があれば、接続の画面の左下の
+**「ネットワークの許可を消す」** で消せます(管理者の確認が出ます。この場所の exe の規則だけを消します)。
+規則が無いときは「ネットワークの許可: なし」と出て、押せません。
+
+iivnc-client 自身が書くのは ini と、`log=1` のときのログ(どちらも exe と同じ場所)だけです。
+ほかには、起動したアプリすべてに Windows が付ける記録(表示名の控え、起動回数など)があるだけです
+(2026-10-04、この PC のレジストリを検索して確かめた)。
+
 ## ini で選べること(画面からは選べないもの)
 
 - `render=gdi`(既定)/ `render=gpu` … 描画の方式。上の「描画」を参照(接続の画面・メニューからも選べます)。
@@ -89,6 +100,7 @@ Windows 10 / 11 用の VNC ビューアです。ほかの PC の画面を見た�
 iivnc-client.exe [サーバー] [-password <pw>] [-viewonly] [-fullscreen]
                  [-quality high|lossless|normal|low] [-ini <path>] [-log]
                  [-render gdi|gpu]
+iivnc-client.exe -remove-firewall   管理者で: ファイアウォールの、この exe の規則を消す
 ```
 
 ## ビルド

@@ -34,7 +34,7 @@
 #include "zlite.h"
 
 #define APP_NAME      L"iivnc-client"
-#define APP_VERSION   L"1.4.0"
+#define APP_VERSION   L"1.5.0"
 
 #define WM_APP_CONNECTED  (WM_APP + 1)  /* 初期化まで済んだ */
 #define WM_APP_FRAME      (WM_APP + 2)  /* 更新を 1 回受け終えた */
@@ -82,6 +82,13 @@ extern int   g_exitAfter;           /* -exitafter N: N 回の更新で終わる(
 extern int   g_idleExitMs;          /* -idleexit ms: 更新が止まってこの時間で終わる */
 extern int   g_forceEnc;            /* -encoding: そのエンコーディングだけを求める(-1 = 普段どおり) */
 extern BOOL  g_hookTest;            /* -hooktest: 注入したキーもフックで横取りする(検証用) */
+
+/* fwrules.c: Windows ファイアウォールの、この exe の規則(iivnc-server と同じファイル) */
+typedef struct { int count, allow, block; long allowProfiles, blockProfiles; } FwInfo;
+BOOL fw_query(const WCHAR *keep, FwInfo *fi);                   /* keep: 数えない規則の名前(NULL 可) */
+int  fw_remove(const WCHAR *keep);                              /* 管理者で。消した数、-1 = 失敗 */
+int  fw_remove_elevated(HWND owner, const WCHAR *keep, const WCHAR *args);
+void fw_describe(const FwInfo *fi, WCHAR *s, int cap);
 
 void config_init(void);
 void config_load(void);
