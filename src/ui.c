@@ -96,6 +96,9 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         SendMessageW(q, CB_ADDSTRING, 0, (LPARAM)L"標準(Wi-Fi・遠隔地)");
         SendMessageW(q, CB_ADDSTRING, 0, (LPARAM)L"細い回線");
         SendMessageW(q, CB_SETCURSEL, (WPARAM)g_cfg.quality, 0);
+        SendDlgItemMessageW(dlg, IDC_RENDER, CB_ADDSTRING, 0, (LPARAM)L"GDI(メモリが少ない)");
+        SendDlgItemMessageW(dlg, IDC_RENDER, CB_ADDSTRING, 0, (LPARAM)L"GPU(縮めても文字がきれい)");
+        SendDlgItemMessageW(dlg, IDC_RENDER, CB_SETCURSEL, g_cfg.renderGdi ? 0 : 1, 0);
         CheckDlgButton(dlg, IDC_VIEWONLY, g_cfg.viewOnly ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dlg, IDC_FULLSCREEN, g_cfg.fullscreen ? BST_CHECKED : BST_UNCHECKED);
         if (g_error) {
@@ -187,6 +190,7 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
             g_cfg.savePassword = IsDlgButtonChecked(dlg, IDC_SAVEPW) == BST_CHECKED;
             g_cfg.quality = (int)SendDlgItemMessageW(dlg, IDC_QUALITY, CB_GETCURSEL, 0, 0);
             if (g_cfg.quality < 0 || g_cfg.quality >= Q_COUNT) g_cfg.quality = Q_HIGH;
+            g_cfg.renderGdi = SendDlgItemMessageW(dlg, IDC_RENDER, CB_GETCURSEL, 0, 0) != 1;
             g_cfg.viewOnly = IsDlgButtonChecked(dlg, IDC_VIEWONLY) == BST_CHECKED;
             g_cfg.fullscreen = IsDlgButtonChecked(dlg, IDC_FULLSCREEN) == BST_CHECKED;
             config_add_history(host);

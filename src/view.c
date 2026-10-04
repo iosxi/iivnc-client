@@ -7,6 +7,11 @@
  *  (UpdateSubresource はドライバが送り出し用の領域を毎回用意し、絵が途切れなく
  *  届くと 4K で 200MB 近くまで溜まった。2026-10-04 実測)。縮めるときはミップ
  *  マップを作って三線形で引く。D3D11 が使えなければ GDI(StretchDIBits)。
+ *  既定は GDI(メモリが少ない)。接続の画面・メニュー・ini の render=gpu で D3D11 にでき、
+ *  つないだまま切り替えられる。D3D11 のスワップチェーンは窓に重ねた子窓(キャンバス)に
+ *  結びつけ、GDI へ戻すときは子窓ごと捨てる(flip モデルを結びつけた窓は、スワップチェーンを
+ *  捨てても最後の絵が出たままになり、GDI で描いても映らないため)。子窓は無効にしてあるので、
+ *  マウスは親の窓が受け取る。
  *
  *  入力
  *   - キーは仮想キーから キーシム と スキャン コード(QEMU の番号)を作って送る。
@@ -43,7 +48,7 @@ enum { IDB_RESTORE = 0x180, IDB_MENU, IDB_MIN, IDB_CLOSE };
 
 enum {
     IDM_FULLSCREEN = 0x100, IDM_FIT, IDM_ACTUAL, IDM_Q_HIGH, IDM_Q_LOSSLESS, IDM_Q_NORMAL, IDM_Q_LOW,
-    IDM_VIEWONLY, IDM_CAD, IDM_SENDF8, IDM_REFRESH, IDM_STATS, IDM_DISCONNECT, IDM_GRAB
+    IDM_VIEWONLY, IDM_CAD, IDM_SENDF8, IDM_REFRESH, IDM_STATS, IDM_DISCONNECT, IDM_GRAB, IDM_RENDER_GDI, IDM_RENDER_GPU
 };
 
 HWND g_view;
@@ -63,6 +68,8 @@ static ID3D11PixelShader        *g_ps;
 static ID3D11SamplerState       *g_sampLinear, *g_sampPoint;
 static int                       g_texW, g_texH;
 static BOOL                      g_d3d, g_d3dFailed, g_tearing;
+static HWND                      g_canvas;      /* スワップチェーンを結びつける子窓 */
+#define CANVAS_CLASS L"iivnc.Client.Canvas"
 
 /* 表示 */
 static RECT    g_dst;           /* 絵を置く矩形(クライアント座標) */
@@ -127,8 +134,49 @@ static void d3d_release(void)
     SAFE_RELEASE(g_sc, IDXGISwapChain1);
     SAFE_RELEASE(g_ctx, ID3D11DeviceContext);
     SAFE_RELEASE(g_dev, ID3D11Device);
+    if (g_canvas && IsWindow(g_canvas)) DestroyWindow(g_canvas);
+    g_canvas = NULL;
     g_texW = g_texH = 0;
     g_d3d = FALSE;
+}
+
+static void d3d_draw(void);
+
+static LRESULT CALLBACK canvas_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        BeginPaint(h, &ps);
+        EndPaint(h, &ps);
+        d3d_draw();
+        return 0;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_NCHITTEST:
+        return HTTRANSPARENT;
+    }
+    return DefWindowProcW(h, msg, wp, lp);
+}
+
+/* 親の窓の中身いっぱいに子窓を出す */
+static BOOL canvas_create(HWND parent)
+{
+    static BOOL registered;
+    RECT c;
+    if (!registered) {
+        WNDCLASSW wc;
+        ZeroMemory(&wc, sizeof(wc));
+        wc.lpfnWndProc = canvas_proc;
+        wc.hInstance = g_inst;
+        wc.lpszClassName = CANVAS_CLASS;
+        registered = RegisterClassW(&wc) != 0;
+    }
+    GetClientRect(parent, &c);
+    g_canvas = CreateWindowExW(0, CANVAS_CLASS, L"", WS_CHILD | WS_VISIBLE | WS_DISABLED,
+                               0, 0, max(c.right, 1), max(c.bottom, 1), parent, NULL, g_inst, NULL);
+    return g_canvas != NULL;
 }
 
 static BOOL d3d_init(HWND hwnd)
@@ -143,10 +191,12 @@ static BOOL d3d_init(HWND hwnd)
     HRESULT hr;
 
     if (g_d3d) return TRUE;
-    if (g_d3dFailed || g_forceGdi || g_cfg.renderGdi) return FALSE;
+    if (g_d3dFailed || g_cfg.renderGdi) return FALSE;
     hr = D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_BGRA_SUPPORT, want, ARRAYSIZE(want),
                            D3D11_SDK_VERSION, &g_dev, &fl, &g_ctx);
     if (FAILED(hr)) goto fail;
+    hr = E_FAIL;
+    if (!canvas_create(hwnd)) goto fail;
     if (FAILED(ID3D11Device_QueryInterface(g_dev, &IID_IDXGIDevice, (void **)&dd))) goto fail;
     {
         IDXGIDevice1 *d1 = NULL;
@@ -171,9 +221,9 @@ static BOOL d3d_init(HWND hwnd)
     sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
     sd.Flags = g_tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-    hr = IDXGIFactory2_CreateSwapChainForHwnd(fac, (IUnknown *)g_dev, hwnd, &sd, NULL, NULL, &g_sc);
+    hr = IDXGIFactory2_CreateSwapChainForHwnd(fac, (IUnknown *)g_dev, g_canvas, &sd, NULL, NULL, &g_sc);
     if (FAILED(hr)) goto fail;
-    IDXGIFactory2_MakeWindowAssociation(fac, hwnd, DXGI_MWA_NO_ALT_ENTER);
+    IDXGIFactory2_MakeWindowAssociation(fac, g_canvas, DXGI_MWA_NO_ALT_ENTER);
     if (FAILED(ID3D11Device_CreateVertexShader(g_dev, g_vsCode, sizeof(g_vsCode), NULL, &g_vs)) ||
         FAILED(ID3D11Device_CreatePixelShader(g_dev, g_psCode, sizeof(g_psCode), NULL, &g_ps))) goto fail;
     ZeroMemory(&smp, sizeof(smp));
@@ -613,6 +663,7 @@ static void update_checks(HMENU m)
     CheckMenuItem(m, IDM_GRAB, MF_BYCOMMAND | (g_cfg.grab == GRAB_ALWAYS ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(m, IDM_VIEWONLY, MF_BYCOMMAND | (g_params.viewOnly ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(m, IDM_STATS, MF_BYCOMMAND | (g_cfg.showStats ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuRadioItem(m, IDM_RENDER_GDI, IDM_RENDER_GPU, g_cfg.renderGdi ? IDM_RENDER_GDI : IDM_RENDER_GPU, MF_BYCOMMAND);
     EnableMenuItem(m, IDM_CAD, MF_BYCOMMAND | (g_params.viewOnly ? MF_GRAYED : MF_ENABLED));
     EnableMenuItem(m, IDM_SENDF8, MF_BYCOMMAND | (g_params.viewOnly ? MF_GRAYED : MF_ENABLED));
 }
@@ -867,7 +918,7 @@ static void finish_test(void)
 
 static void build_menu(HMENU m)
 {
-    HMENU q = CreatePopupMenu();
+    HMENU q = CreatePopupMenu(), r = CreatePopupMenu();
     AppendMenuW(q, MF_STRING | (g_cfg.quality == Q_HIGH ? MF_CHECKED : 0), IDM_Q_HIGH, L"高画質(おすすめ)");
     AppendMenuW(q, MF_STRING | (g_cfg.quality == Q_LOSSLESS ? MF_CHECKED : 0), IDM_Q_LOSSLESS, L"劣化なし(LAN 向け)");
     AppendMenuW(q, MF_STRING | (g_cfg.quality == Q_NORMAL ? MF_CHECKED : 0), IDM_Q_NORMAL, L"標準(Wi-Fi・遠隔地)");
@@ -876,6 +927,10 @@ static void build_menu(HMENU m)
     AppendMenuW(m, MF_STRING | (g_cfg.fit ? MF_CHECKED : 0), IDM_FIT, L"窓に合わせる(&W)");
     AppendMenuW(m, MF_STRING | (!g_cfg.fit ? MF_CHECKED : 0), IDM_ACTUAL, L"等倍(&A)");
     AppendMenuW(m, MF_POPUP, (UINT_PTR)q, L"画質(&Q)");
+    AppendMenuW(r, MF_STRING, IDM_RENDER_GDI, L"GDI(メモリが少ない)");
+    AppendMenuW(r, MF_STRING, IDM_RENDER_GPU, L"GPU(縮めても文字がきれい)");
+    CheckMenuRadioItem(r, IDM_RENDER_GDI, IDM_RENDER_GPU, g_cfg.renderGdi ? IDM_RENDER_GDI : IDM_RENDER_GPU, MF_BYCOMMAND);
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)r, L"描画(&G)");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | (g_params.viewOnly ? MF_GRAYED : 0), IDM_CAD, L"Ctrl+Alt+Del を送る(&C)");
     AppendMenuW(m, MF_STRING | (g_params.viewOnly ? MF_GRAYED : 0), IDM_SENDF8, L"F8 を送る(&8)");
@@ -894,6 +949,28 @@ static void show_menu(int x, int y)
     view_release_keys();
     TrackPopupMenu(m, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON, x, y, 0, g_view, NULL);
     DestroyMenu(m);
+}
+
+/* 描画の方式を切り替える(つないだまま) */
+static void set_render(BOOL gdi)
+{
+    if (g_cfg.renderGdi == gdi) return;
+    g_cfg.renderGdi = gdi;
+    config_save();
+    if (gdi) {
+        d3d_release();
+    } else {
+        g_d3dFailed = FALSE;
+        if (g_connected && d3d_init(g_view)) {
+            RECT all;
+            AcquireSRWLockShared(&g_rm.lock);
+            SetRect(&all, 0, 0, g_rm.w, g_rm.h);
+            ReleaseSRWLockShared(&g_rm.lock);
+            d3d_upload(all);
+        }
+    }
+    log_printf(L"描画を %s に切り替えた", g_d3d ? L"GPU(D3D11)" : L"GDI");
+    InvalidateRect(g_view, NULL, FALSE);
 }
 
 static void command(int id)
@@ -930,6 +1007,7 @@ static void command(int id)
         view_set_title();
         break;
     case IDM_DISCONNECT: PostMessageW(g_view, WM_CLOSE, 0, 0); break;
+    case IDM_RENDER_GDI: case IDM_RENDER_GPU: set_render(id == IDM_RENDER_GDI); break;
     }
 }
 
@@ -1156,6 +1234,7 @@ static LRESULT CALLBACK view_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SIZE:
         if (g_d3d && g_sc) {
             d3d_release_target();
+            MoveWindow(g_canvas, 0, 0, max(LOWORD(lp), 1), max(HIWORD(lp), 1), FALSE);
             IDXGISwapChain1_ResizeBuffers(g_sc, 0, 0, 0, DXGI_FORMAT_UNKNOWN, g_tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0);
         }
         layout();
@@ -1238,7 +1317,7 @@ static LRESULT CALLBACK view_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_SYSCOMMAND:
-        if ((wp & 0xFFF0) < 0xF000 && wp >= IDM_FULLSCREEN && wp <= IDM_GRAB) { command((int)wp); return 0; }
+        if ((wp & 0xFFF0) < 0xF000 && wp >= IDM_FULLSCREEN && wp <= IDM_RENDER_GPU) { command((int)wp); return 0; }
         if ((wp & 0xFFF0) == SC_KEYMENU) return 0;      /* Alt で窓のメニューへ行かない */
         break;
 
@@ -1293,7 +1372,7 @@ HWND view_create(void)
     wc.hCursor = NULL;
     wc.lpszClassName = VIEW_CLASS;
     RegisterClassExW(&wc);
-    g_view = CreateWindowExW(0, VIEW_CLASS, L"iivnc-client", WS_OVERLAPPEDWINDOW,
+    g_view = CreateWindowExW(0, VIEW_CLASS, L"iivnc-client", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                              CW_USEDEFAULT, CW_USEDEFAULT, 640, 400, NULL, NULL, g_inst, NULL);
     if (g_view) {
         BOOL dark = theme_is_dark();

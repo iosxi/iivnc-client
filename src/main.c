@@ -8,6 +8,7 @@
  *  -password <pw>   パスワード          -viewonly    見るだけ
  *  -fullscreen      全画面で開く        -quality high|lossless|normal|low
  *  -ini <path>      別の設定ファイル    -log         ログを書く
+ *  -render gdi|gpu  描画の方式(-gdi・-gpu とも書ける)
  *
  *  検証用:
  *  -dump <file.bmp> 終わるときに受け取った絵を BMP に書く
@@ -27,7 +28,6 @@ int        g_exitAfter;
 int        g_idleExitMs;
 int        g_forceEnc = -1;
 BOOL       g_hookTest;
-BOOL       g_forceGdi;
 
 static BOOL g_everConnected;
 
@@ -99,7 +99,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
     WCHAR   hostArg[256] = L"";
     char    pwArg[9] = { 0 };
     BOOL    havePw = FALSE, logArg = FALSE, viewArg = FALSE, fullArg = FALSE;
-    int     qualityArg = -1;
+    int     qualityArg = -1, renderArg = -1;  /* renderArg: 1 = GDI、0 = GPU */
     INITCOMMONCONTROLSEX icc;
 
     (void)prev; (void)cmdline; (void)show;
@@ -127,7 +127,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
             else if (!lstrcmpiW(a, L"exitafter") && i + 1 < argc) g_exitAfter = _wtoi(argv[++i]);
             else if (!lstrcmpiW(a, L"idleexit") && i + 1 < argc) g_idleExitMs = _wtoi(argv[++i]);
             else if (!lstrcmpiW(a, L"hooktest")) g_hookTest = TRUE;
-            else if (!lstrcmpiW(a, L"gdi")) g_forceGdi = TRUE;
+            else if (!lstrcmpiW(a, L"gdi")) renderArg = 1;
+            else if (!lstrcmpiW(a, L"gpu")) renderArg = 0;
+            else if (!lstrcmpiW(a, L"render") && i + 1 < argc) renderArg = lstrcmpiW(argv[++i], L"gpu") != 0;
             else if (!lstrcmpiW(a, L"encoding") && i + 1 < argc) {
                 const WCHAR *e = argv[++i];
                 g_forceEnc = !lstrcmpiW(e, L"raw") ? 0 : !lstrcmpiW(e, L"rre") ? 2 : !lstrcmpiW(e, L"hextile") ? 5 :
@@ -150,6 +152,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
     log_printf(L"iivnc-client %s 起動 (設定 %s)", APP_VERSION, g_iniPath);
 
     if (qualityArg >= 0) g_cfg.quality = qualityArg;
+    if (renderArg >= 0) g_cfg.renderGdi = renderArg;
     if (viewArg) g_cfg.viewOnly = TRUE;
     if (fullArg) g_cfg.fullscreen = TRUE;
 

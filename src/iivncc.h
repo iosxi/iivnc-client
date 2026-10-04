@@ -34,7 +34,7 @@
 #include "zlite.h"
 
 #define APP_NAME      L"iivnc-client"
-#define APP_VERSION   L"1.2.0"
+#define APP_VERSION   L"1.3.0"
 
 #define WM_APP_CONNECTED  (WM_APP + 1)  /* 初期化まで済んだ */
 #define WM_APP_FRAME      (WM_APP + 2)  /* 更新を 1 回受け終えた */
@@ -64,7 +64,7 @@ typedef struct Config {
     BOOL  fit;                  /* 窓に合わせて縮める(FALSE = 等倍) */
     int   grab;                 /* システムのキーを相手へ送るとき */
     BOOL  showStats;            /* タイトルに速さを出す */
-    BOOL  renderGdi;            /* 1 = GDI で描く(メモリが少ない。縮めたときの画質と速さは落ちる) */
+    BOOL  renderGdi;            /* 1 = GDI で描く(既定。メモリが少ない。縮めたときの画質と速さは落ちる)、0 = D3D11 */
     int   theme;
     int   log;
     WCHAR history[MAX_HISTORY][256];
@@ -80,9 +80,8 @@ extern HINSTANCE g_inst;
 extern WCHAR g_dumpPath[MAX_PATH];  /* -dump: 更新を受けたら絵を BMP に書いて終わる */
 extern int   g_exitAfter;           /* -exitafter N: N 回の更新で終わる(0 = 無し) */
 extern int   g_idleExitMs;          /* -idleexit ms: 更新が止まってこの時間で終わる */
-extern int   g_forceEnc;
-extern BOOL  g_hookTest;
-extern BOOL  g_forceGdi;            /* -gdi: D3D11 を使わず GDI で描く(検証用) */            /* -hooktest: 注入したキーもフックで横取りする(検証用) */            /* -encoding: そのエンコーディングだけを求める(-1 = 普段どおり) */
+extern int   g_forceEnc;            /* -encoding: そのエンコーディングだけを求める(-1 = 普段どおり) */
+extern BOOL  g_hookTest;            /* -hooktest: 注入したキーもフックで横取りする(検証用) */
 
 void config_init(void);
 void config_load(void);

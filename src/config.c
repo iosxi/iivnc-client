@@ -40,6 +40,7 @@ void config_init(void)
     g_cfg.quality = Q_HIGH;
     g_cfg.fit = TRUE;
     g_cfg.grab = GRAB_FULLSCREEN;
+    g_cfg.renderGdi = TRUE;
 }
 
 char *utf16_to_utf8(const WCHAR *s, int *outLen)
@@ -113,7 +114,7 @@ void config_load(void)
         else if (!_stricmp(key, "fit")) g_cfg.fit = atoi(val) != 0;
         else if (!_stricmp(key, "grab")) g_cfg.grab = pick(val, k_grab, 3, GRAB_FULLSCREEN);
         else if (!_stricmp(key, "stats")) g_cfg.showStats = atoi(val) != 0;
-        else if (!_stricmp(key, "render")) g_cfg.renderGdi = !_stricmp(val, "gdi");
+        else if (!_stricmp(key, "render")) g_cfg.renderGdi = _stricmp(val, "gpu") != 0;
         else if (!_stricmp(key, "theme")) g_cfg.theme = !_stricmp(val, "light") ? 1 : !_stricmp(val, "dark") ? 2 : 0;
         else if (!_stricmp(key, "log")) g_cfg.log = atoi(val) != 0;
         else if (!_stricmp(key, "host") && g_cfg.nhistory < MAX_HISTORY && *val)
@@ -153,7 +154,7 @@ BOOL config_save(void)
         "grab=%s\n"
         "; 1 = タイトルに更新の速さを出す\n"
         "stats=%d\n"
-        "; 描画: gpu(D3D11。縮めても文字がきれい)/ gdi(メモリが少ない。4K の相手で約 140MB → 約 40MB。縮めると遅く粗い)\n"
+        "; 描画: gdi(既定。メモリが少ない。縮めると遅く粗い)/ gpu(D3D11。縮めても文字がきれい。メモリは約 100MB 多い)\n"
         "render=%s\n"
         "\n[history]\n",
         k_quality[g_cfg.quality], g_cfg.viewOnly, g_cfg.fullscreen, g_cfg.fit, k_grab[g_cfg.grab], g_cfg.showStats,
