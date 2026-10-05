@@ -417,6 +417,17 @@ static void layout(void)
         g_dst.bottom = g_dst.top + h;
     }
     if (!g_full) update_scrollbars(cw, ch);
+    {
+        /* 大きさの記録(変わったときだけ。窓に合わせた絵が小さい、という報告の手がかり) */
+        static int lcw, lch, lw, lh, lfit;
+        if (cw != lcw || ch != lch || w != lw || h != lh || g_cfg.fit != lfit) {
+            lcw = cw; lch = ch; lw = w; lh = h; lfit = g_cfg.fit;
+            log_printf(L"配置: 窓の中身 %dx%d、相手 %dx%d、%s、倍率 %.3f、絵 (%ld,%ld)-(%ld,%ld)、%s%s",
+                       cw, ch, w, h, g_cfg.fit || g_full ? L"窓に合わせる" : L"等倍", g_scale,
+                       g_dst.left, g_dst.top, g_dst.right, g_dst.bottom, g_d3d ? L"GPU" : L"GDI",
+                       IsZoomed(g_view) ? L"、最大化" : g_full ? L"、全画面" : L"");
+        }
+    }
 }
 
 /* 初めて出すときの大きさ: 等倍で収まれば等倍、収まらなければ作業領域の 9 割に縮める */
