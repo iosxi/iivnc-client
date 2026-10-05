@@ -12,7 +12,7 @@ IDI_APP ICON "iivnc-client.ico"
 // ------------------------------------------------------------------
 //  接続の画面
 // ------------------------------------------------------------------
-IDD_CONNECT DIALOGEX 0, 0, 280, 208
+IDD_CONNECT DIALOGEX 0, 0, 280, 222
 STYLE DS_SHELLFONT | DS_CENTER | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_APPWINDOW
 CAPTION "iivnc-client"
@@ -31,19 +31,20 @@ BEGIN
     COMBOBOX        IDC_RENDER, 84, 93, 184, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     AUTOCHECKBOX    "見るだけ(キー・マウスを送らない)(&V)", IDC_VIEWONLY, 84, 113, 184, 10
     AUTOCHECKBOX    "全画面で開く(&F)", IDC_FULLSCREEN, 84, 127, 184, 10
-    LTEXT           "", IDC_ERROR, 12, 144, 256, 36, SS_NOPREFIX
+    AUTOCHECKBOX    "つないでいる間はスリープさせず、画面も消さない(&Z)", IDC_NOSLEEP, 84, 141, 184, 10
+    LTEXT           "", IDC_ERROR, 12, 158, 256, 36, SS_NOPREFIX
 
-    PUSHBUTTON      "", IDC_FWREMOVE, 12, 188, 136, 14
-    DEFPUSHBUTTON   "接続(&O)", IDOK, 156, 188, 54, 14
-    PUSHBUTTON      "キャンセル", IDCANCEL, 214, 188, 54, 14
+    PUSHBUTTON      "", IDC_FWREMOVE, 12, 202, 136, 14
+    DEFPUSHBUTTON   "接続(&O)", IDOK, 156, 202, 54, 14
+    PUSHBUTTON      "キャンセル", IDCANCEL, 214, 202, 54, 14
 END
 
 // ------------------------------------------------------------------
 //  版
 // ------------------------------------------------------------------
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1, 7, 0, 0
-PRODUCTVERSION  1, 7, 0, 0
+FILEVERSION     1, 8, 0, 0
+PRODUCTVERSION  1, 8, 0, 0
 FILEOS          VOS_NT_WINDOWS32
 FILETYPE        VFT_APP
 BEGIN
@@ -53,11 +54,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "iosxi"
             VALUE "FileDescription",  "iivnc-client (VNC ビューア)"
-            VALUE "FileVersion",      "1.7.0"
+            VALUE "FileVersion",      "1.8.0"
             VALUE "InternalName",     "iivnc-client"
             VALUE "OriginalFilename", "iivnc-client.exe"
             VALUE "ProductName",      "iivnc"
-            VALUE "ProductVersion",   "1.7.0"
+            VALUE "ProductVersion",   "1.8.0"
         END
     END
     BLOCK "VarFileInfo"

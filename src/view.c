@@ -1094,9 +1094,42 @@ static void on_frame(void)
     if (g_exitAfter && g_rm.updates >= g_exitAfter) finish_test();
 }
 
+/* ------------------------------------------------------------------ */
+/*  スリープさせない(nosleep=1)                                         */
+/* ------------------------------------------------------------------ */
+
+/* Windows の電源の要求(PowerSetRequest)で、スリープと画面の消灯を止める。
+   理由の文字列を付けるので、powercfg /requests で誰が止めているか見える */
+static void keep_awake(BOOL on, const WCHAR *reason)
+{
+    static HANDLE req;
+    static BOOL   active;
+    if (on == active) return;
+    if (!req) {
+        REASON_CONTEXT rc;
+        ZeroMemory(&rc, sizeof(rc));
+        rc.Version = POWER_REQUEST_CONTEXT_VERSION;
+        rc.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
+        rc.Reason.SimpleReasonString = (LPWSTR)reason;
+        req = PowerCreateRequest(&rc);
+        if (req == INVALID_HANDLE_VALUE) req = NULL;
+        if (!req) { log_printf(L"スリープを止められない (%lu)", GetLastError()); return; }
+    }
+    if (on) {
+        PowerSetRequest(req, PowerRequestSystemRequired);
+        PowerSetRequest(req, PowerRequestDisplayRequired);
+    } else {
+        PowerClearRequest(req, PowerRequestSystemRequired);
+        PowerClearRequest(req, PowerRequestDisplayRequired);
+    }
+    active = on;
+    log_printf(on ? L"スリープと画面の消灯を止めた" : L"スリープと画面の消灯の止めを解いた");
+}
+
 static void on_connected(void)
 {
     g_connected = TRUE;
+    keep_awake(g_cfg.noSleep, L"iivnc-client: サーバーにつないでいる");
     if (!g_d3d) d3d_init(g_view);
     if (g_d3d) {
         AcquireSRWLockShared(&g_rm.lock);
@@ -1207,6 +1240,7 @@ static LRESULT CALLBACK view_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_APP_CLOSED:
         g_connected = FALSE;
+        keep_awake(FALSE, NULL);
         KillTimer(hwnd, TIMER_STATS);
         view_release_keys();
         update_hook();

@@ -41,6 +41,7 @@ void config_init(void)
     g_cfg.fit = TRUE;
     g_cfg.grab = GRAB_FULLSCREEN;
     g_cfg.renderGdi = TRUE;
+    g_cfg.noSleep = TRUE;
 }
 
 char *utf16_to_utf8(const WCHAR *s, int *outLen)
@@ -114,6 +115,7 @@ void config_load(void)
         else if (!_stricmp(key, "fit")) g_cfg.fit = atoi(val) != 0;
         else if (!_stricmp(key, "grab")) g_cfg.grab = pick(val, k_grab, 3, GRAB_FULLSCREEN);
         else if (!_stricmp(key, "stats")) g_cfg.showStats = atoi(val) != 0;
+        else if (!_stricmp(key, "nosleep")) g_cfg.noSleep = atoi(val) != 0;
         else if (!_stricmp(key, "render")) g_cfg.renderGdi = _stricmp(val, "gpu") != 0;
         else if (!_stricmp(key, "theme")) g_cfg.theme = !_stricmp(val, "light") ? 1 : !_stricmp(val, "dark") ? 2 : 0;
         else if (!_stricmp(key, "log")) g_cfg.log = atoi(val) != 0;
@@ -156,9 +158,11 @@ BOOL config_save(void)
         "stats=%d\n"
         "; 描画: gdi(既定。メモリが少ない。縮めると遅く粗い)/ gpu(D3D11。縮めても文字がきれい。メモリは約 100MB 多い)\n"
         "render=%s\n"
+        "; 1 = つないでいる間はスリープさせず、画面も消さない\n"
+        "nosleep=%d\n"
         "\n[history]\n",
         k_quality[g_cfg.quality], g_cfg.viewOnly, g_cfg.fullscreen, g_cfg.fit, k_grab[g_cfg.grab], g_cfg.showStats,
-        g_cfg.renderGdi ? "gdi" : "gpu");
+        g_cfg.renderGdi ? "gdi" : "gpu", g_cfg.noSleep);
     for (i = 0; i < g_cfg.nhistory; i++) {
         char *h = utf16_to_utf8(g_cfg.history[i], NULL);
         if (h) { p += sprintf(p, "host=%s\n", h); free(h); }

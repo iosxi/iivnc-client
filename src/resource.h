@@ -14,3 +14,4 @@
 #define IDC_ERROR        1009
 #define IDC_RENDER       1010
 #define IDC_FWREMOVE     1011
+#define IDC_NOSLEEP      1012

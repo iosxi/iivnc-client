@@ -127,6 +127,7 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         SendDlgItemMessageW(dlg, IDC_RENDER, CB_SETCURSEL, g_cfg.renderGdi ? 0 : 1, 0);
         CheckDlgButton(dlg, IDC_VIEWONLY, g_cfg.viewOnly ? BST_CHECKED : BST_UNCHECKED);
         CheckDlgButton(dlg, IDC_FULLSCREEN, g_cfg.fullscreen ? BST_CHECKED : BST_UNCHECKED);
+        CheckDlgButton(dlg, IDC_NOSLEEP, g_cfg.noSleep ? BST_CHECKED : BST_UNCHECKED);
         fw_refresh(dlg);
         g_info = FALSE;
         if (g_error) {
@@ -222,6 +223,7 @@ static INT_PTR CALLBACK dlg_proc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
             g_cfg.renderGdi = SendDlgItemMessageW(dlg, IDC_RENDER, CB_GETCURSEL, 0, 0) != 1;
             g_cfg.viewOnly = IsDlgButtonChecked(dlg, IDC_VIEWONLY) == BST_CHECKED;
             g_cfg.fullscreen = IsDlgButtonChecked(dlg, IDC_FULLSCREEN) == BST_CHECKED;
+            g_cfg.noSleep = IsDlgButtonChecked(dlg, IDC_NOSLEEP) == BST_CHECKED;
             config_add_history(host);
             config_set_password(host, g_cfg.savePassword ? g_cfg.password : "");
             config_save();

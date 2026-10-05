@@ -35,7 +35,7 @@
 #include "zlite.h"
 
 #define APP_NAME      L"iivnc-client"
-#define APP_VERSION   L"1.7.0"
+#define APP_VERSION   L"1.8.0"
 
 #define WM_APP_CONNECTED  (WM_APP + 1)  /* 初期化まで済んだ */
 #define WM_APP_FRAME      (WM_APP + 2)  /* 更新を 1 回受け終えた */
@@ -66,6 +66,7 @@ typedef struct Config {
     BOOL  fit;                  /* 窓に合わせて縮める(FALSE = 等倍) */
     int   grab;                 /* システムのキーを相手へ送るとき */
     BOOL  showStats;            /* タイトルに速さを出す */
+    BOOL  noSleep;              /* 1 = つないでいる間はスリープさせず、画面も消さない */
     BOOL  renderGdi;            /* 1 = GDI で描く(既定。メモリが少ない。縮めたときの画質と速さは落ちる)、0 = D3D11 */
     int   theme;
     int   log;

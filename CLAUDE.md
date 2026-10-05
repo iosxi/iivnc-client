@@ -124,6 +124,19 @@ WSL の AlmaLinux-9 に**何も入れずに**動かした(2026-10-04)。
   (クラス名 `#32768` だけで探すと、利用者の別のアプリのメニューを拾って結果が揺れた)。
   別のプロセスから `GetSystemMenu` を呼ぶ試験は、クライアントが命令を受け付けなくなったので使わない。
 
+### スリープさせない(2026-10-05、server v7 / client v9)
+
+利用者の要望: つないでいる間はスリープさせない。決めたこと: サーバー(接続されている間)とクライアント(つないでいる間)の
+両方、画面の消灯も止める、既定オン(server `nosleep=1`、client `nosleep=1`)。
+
+- `PowerCreateRequest`(理由の文字列つき)+ `PowerSetRequest(SystemRequired と DisplayRequired)`。
+  サーバーは `WM_APP_CLIENTS`(接続の数が変わった)と設定の変更・分身の読み直しで `power_update()`、
+  クライアントはつないだとき(`on_connected`)に止め、切れたとき(`WM_APP_CLOSED`)に解く。プロセスが終われば Windows が解く。
+- `python ../iivnc-server/tools/nosleepcheck.py`: 管理者の `powercfg /requests` で、つないでいる間はサーバーと
+  クライアントの両方が SYSTEM と DISPLAY に出て、閉じたら消える、nosleep=0 なら出ない、を確かめる(ALL OK)。
+  サーバー側から切れたときも、クライアントはすぐ解く(記録で確認)。
+- 確かめていないこと: サービスの分身(SYSTEM)からの電源の要求。
+
 ### 窓に合わせているのに、最大化で絵が小さい、という報告(2026-10-05、v7)
 
 利用者の報告: MSI(Windows 10)のクライアントから、この PC(4K)のサーバーへ。「窓に合わせる」なのに、
