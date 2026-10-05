@@ -27,6 +27,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <commctrl.h>
+#include <shellapi.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -34,7 +35,7 @@
 #include "zlite.h"
 
 #define APP_NAME      L"iivnc-client"
-#define APP_VERSION   L"1.6.0"
+#define APP_VERSION   L"1.7.0"
 
 #define WM_APP_CONNECTED  (WM_APP + 1)  /* 初期化まで済んだ */
 #define WM_APP_FRAME      (WM_APP + 2)  /* 更新を 1 回受け終えた */
@@ -44,6 +45,7 @@
 #define WM_APP_SETCLIP    (WM_APP + 6)  /* lParam = 相手から来た文字(malloc した WCHAR*) */
 #define WM_APP_POINTER    (WM_APP + 7)  /* 相手がカーソルを動かした */
 #define WM_APP_BELL       (WM_APP + 8)
+#define WM_APP_FXOFFER    (WM_APP + 9)  /* 検証用(-fxoffer): 今クリップボードにあるファイルを相手へ渡す */
 
 /* ------------------------------------------------------------------ */
 /*  設定(config.c)                                                     */
@@ -82,6 +84,8 @@ extern int   g_exitAfter;           /* -exitafter N: N 回の更新で終わる(
 extern int   g_idleExitMs;          /* -idleexit ms: 更新が止まってこの時間で終わる */
 extern int   g_forceEnc;            /* -encoding: そのエンコーディングだけを求める(-1 = 普段どおり) */
 extern BOOL  g_hookTest;            /* -hooktest: 注入したキーもフックで横取りする(検証用) */
+extern BOOL  g_fxOffer;             /* -fxoffer: つながったら、今クリップボードにあるファイルを渡す(検証用) */
+extern BOOL  g_fxNoWatch;           /* -fxnowatch: コピーしたファイルを渡さない(検証用。1 台で試すとき、両側が貼り合わないように) */
 
 /* fwrules.c: Windows ファイアウォールの、この exe の規則(iivnc-server と同じファイル) */
 typedef struct { int count, allow, block; long allowProfiles, blockProfiles; } FwInfo;
@@ -142,6 +146,24 @@ void conn_set_quality(int q);
 void conn_send_pointer(int mask, int x, int y);
 void conn_send_key(BOOL down, unsigned keysym, unsigned scan);   /* scan は QEMU の番号(0 = 無し) */
 void conn_send_clipboard(const char *utf8, int len);            /* こちらのクリップボードが変わった */
+void conn_send_files(HDROP hd);                                 /* こちらでファイルがコピーされた */
+
+/* filexfer.c: ファイルのコピー＆貼り付け(iivnc-server と同じファイル) */
+#define FX_MSG          105                 /* RFB のメッセージ番号(両向き。iivnc どうしだけで使う) */
+#define PSE_IIVNC_FILES ((int)0x69467831)   /* 「ファイルを受け渡せる」と知らせる疑似エンコーディング */
+#define FX_MAX          (16 << 20)          /* 1 つのメッセージの中身の上限 */
+enum { FX_HELLO = 1, FX_FILES, FX_READ, FX_DATA };
+BOOL fx_make_offer(const int *conns, int nconn, HDROP hd, BYTE **out, int *outLen);
+BOOL fx_make_offer_paths(const int *conns, int nconn, const WCHAR *paths, BYTE **out, int *outLen);
+WCHAR *fx_hdrop_paths(HDROP hd);                                /* 0 区切りの一覧(HeapFree) */
+HANDLE fx_host_user_token(void);                                /* なりすます利用者(無ければ NULL。呼んだ側が閉じる) */
+void fx_request(int conn, const BYTE *p, int n);
+void fx_deliver(int conn, const BYTE *p, int n);
+void fx_conn_closed(int conn);
+void fx_offer_received(int conn, const BYTE *p, int n);
+BOOL fx_clipboard_is_ours(void);
+void fx_stop(void);
+BOOL fx_host_send(int conn, int sub, const BYTE *p, int n);    /* conn.c: 相手へ FX_MSG を送る */
 void conn_request_full(void);
 BOOL conn_qemu_keys(void);
 const WCHAR *conn_last_error(void);

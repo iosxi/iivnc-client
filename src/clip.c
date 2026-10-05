@@ -8,6 +8,9 @@
  *
  *  相手から来た文字は、ここでクリップボードに置く。自分で置いたときの
  *  WM_CLIPBOARDUPDATE は無視する(相手へ送り返さない)。
+ *
+ *  エクスプローラーでファイルをコピーした(CF_HDROP)ときは、ファイルの一覧を
+ *  渡す(filexfer.c。中身は相手が貼り付けたときに送る)。
  * ================================================================== */
 
 #include "iivncc.h"
@@ -69,6 +72,15 @@ void clip_on_update(HWND hwnd)
     int   len = 0;
     if (g_ignoreNext || GetClipboardOwner() == hwnd) {
         g_ignoreNext = FALSE;
+        return;
+    }
+    if (fx_clipboard_is_ours()) return;     /* 相手から来たファイルを置いた */
+    if (IsClipboardFormatAvailable(CF_HDROP)) {
+        if (open_clipboard(hwnd)) {
+            HDROP hd = (HDROP)GetClipboardData(CF_HDROP);
+            if (hd && !g_fxNoWatch) conn_send_files(hd);
+            CloseClipboard();
+        }
         return;
     }
     t = read_clipboard(hwnd, &len);

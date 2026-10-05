@@ -1197,6 +1197,14 @@ static LRESULT CALLBACK view_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         clip_set_from_remote(hwnd, (WCHAR *)lp);
         return 0;
 
+    case WM_APP_FXOFFER:                /* 検証用: 今クリップボードにあるファイルを渡す */
+        if (IsClipboardFormatAvailable(CF_HDROP) && OpenClipboard(hwnd)) {
+            HDROP hd = (HDROP)GetClipboardData(CF_HDROP);
+            if (hd) conn_send_files(hd);
+            CloseClipboard();
+        } else log_printf(L"[fxoffer] クリップボードにファイルが無い");
+        return 0;
+
     case WM_APP_CLOSED:
         g_connected = FALSE;
         KillTimer(hwnd, TIMER_STATS);

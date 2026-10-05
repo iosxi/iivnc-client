@@ -30,7 +30,7 @@ fxc /nologo /T vs_4_0 /E vs /O3 /Vn g_vsCode /Fh build\shader_vs.h src\view.hlsl
 fxc /nologo /T ps_4_0 /E ps /O3 /Vn g_psCode /Fh build\shader_ps.h src\view.hlsl >nul || exit /b 1
 rc /nologo /fo build\obj\iivnc-client.res src\iivnc-client.rc || exit /b 1
 
-set "SRC=src\main.c src\config.c src\conn.c src\decode.c src\jpeg.c src\view.c src\keymap.c src\clip.c src\ui.c src\theme.c src\zdeflate.c src\zinflate.c src\vncdes.c src\fwrules.c"
+set "SRC=src\main.c src\config.c src\conn.c src\decode.c src\jpeg.c src\view.c src\keymap.c src\clip.c src\ui.c src\theme.c src\zdeflate.c src\zinflate.c src\vncdes.c src\fwrules.c src\filexfer.c"
 set "LIBS=user32.lib gdi32.lib shell32.lib comctl32.lib dwmapi.lib uxtheme.lib ole32.lib ws2_32.lib d3d11.lib dxgi.lib dxguid.lib windowscodecs.lib imm32.lib advapi32.lib oleaut32.lib"
 set "CFLAGS=/nologo /utf-8 /W4 /wd4201 /MT /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS /D_WIN32_WINNT=0x0A00 /DWINVER=0x0A00 /Ibuild"
 

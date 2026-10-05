@@ -25,6 +25,9 @@
 先頭の `#include` だけ違う)は `../iivnc-server/src` と中身をそろえる。検証プログラムはサーバー側の
 `tools/` にある。
 `src/fwrules.c`(ファイアウォールの、この exe の規則を数える・消す)も同じく先頭の `#include` だけ違う。
+`src/filexfer.c`(ファイルのコピー＆貼り付け)も同じく先頭の `#include` だけ違う。
+ファイルのコピー＆貼り付けの仕組み・検証(`../iivnc-server/tools/fxcheck.py`)・実測は、サーバーの CLAUDE.md に書いた。
+クライアントの検証用の引数: `-fxoffer`(つながったら今のクリップボードのファイルを渡す)、`-fxnowatch`(コピーしたファイルを渡さない)。
 
 ## 動作確認について
 

@@ -17,6 +17,8 @@
  *  -exitafter N     N 回の更新を受けたら終わる
  *  -idleexit ms     更新が ms 止まったら終わる
  *  -encoding tight|zrle|hextile|rre|raw   そのエンコーディングだけを求める
+ *  -fxoffer         つながったら、今クリップボードにあるファイルを渡す
+ *  -fxnowatch       コピーしたファイルを渡さない(1 台で試すとき、両側が貼り合わないように)
  * ================================================================== */
 
 #include "iivncc.h"
@@ -30,6 +32,8 @@ int        g_exitAfter;
 int        g_idleExitMs;
 int        g_forceEnc = -1;
 BOOL       g_hookTest;
+BOOL       g_fxOffer;
+BOOL       g_fxNoWatch;
 
 static BOOL g_everConnected;
 
@@ -129,6 +133,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
             else if (!lstrcmpiW(a, L"exitafter") && i + 1 < argc) g_exitAfter = _wtoi(argv[++i]);
             else if (!lstrcmpiW(a, L"idleexit") && i + 1 < argc) g_idleExitMs = _wtoi(argv[++i]);
             else if (!lstrcmpiW(a, L"hooktest")) g_hookTest = TRUE;
+            else if (!lstrcmpiW(a, L"fxoffer")) g_fxOffer = TRUE;
+            else if (!lstrcmpiW(a, L"fxnowatch")) g_fxNoWatch = TRUE;
             else if (!lstrcmpiW(a, L"remove-firewall")) fwRemove = TRUE;
             else if (!lstrcmpiW(a, L"gdi")) renderArg = 1;
             else if (!lstrcmpiW(a, L"gpu")) renderArg = 0;

@@ -128,6 +128,10 @@ unsigned rd_u32(void) { BYTE b[4]; if (!rd(b, 4)) { g_rdFail = TRUE; return 0; }
 /*  送信                                                                */
 /* ------------------------------------------------------------------ */
 
+extern ConnParams g_params;
+static volatile LONG g_connGen;     /* 接続ごとに増やす(ファイルの受け渡しで、前の接続宛てのものを断る) */
+static volatile LONG g_fxOK;        /* 相手が iivnc で、ファイルを受け渡せると言った */
+
 static BOOL send_all(const void *data, int len)
 {
     const char *p = (const char *)data;
@@ -186,6 +190,7 @@ static void send_encodings(int q)
     list[n++] = -224;           /* LastRect */
     list[n++] = -258;           /* QEMU のキー(スキャン コード) */
     list[n++] = (int)0xC0A1E5CE;/* 拡張クリップボード */
+    list[n++] = PSE_IIVNC_FILES;/* ファイルのコピー＆貼り付け(iivnc どうし) */
     switch (q) {
     case Q_LOSSLESS:            /* 画質を言わない = JPEG を使わない */
         list[n++] = -256 + 1;
@@ -604,6 +609,62 @@ static BOOL framebuffer_update(void)
     return TRUE;
 }
 
+/* ------------------------------------------------------------------ */
+/*  ファイルのコピー＆貼り付け(filexfer.c)                              */
+/* ------------------------------------------------------------------ */
+
+static BOOL fx_usable(void) { return g_fxOK && !g_params.viewOnly; }
+
+BOOL fx_host_send(int conn, int sub, const BYTE *p, int n)
+{
+    BYTE h[8];
+    BOOL ok;
+    if (conn != g_connGen || !g_active || !g_fxOK) return FALSE;
+    h[0] = FX_MSG; h[1] = (BYTE)sub; h[2] = h[3] = 0;
+    put32(h + 4, (unsigned)n);
+    EnterCriticalSection(&g_sendCs);    /* 頭と中身を続けて送る(ほかの送信を間に挟まない) */
+    ok = send_all(h, 8) && (n == 0 || send_all(p, n));
+    LeaveCriticalSection(&g_sendCs);
+    return ok;
+}
+
+/* クライアントは利用者の権限で動いているので、なりすまさない */
+HANDLE fx_host_user_token(void) { return NULL; }
+
+void conn_send_files(HDROP hd)
+{
+    int   id = g_connGen, len = 0;
+    BYTE *out = NULL;
+    if (!g_active || !fx_usable()) return;
+    if (!fx_make_offer(&id, 1, hd, &out, &len)) return;
+    fx_host_send(id, FX_FILES, out, len);
+    HeapFree(GetProcessHeap(), 0, out);
+}
+
+/* FX_MSG: [u8 sub][u8 0][u8 0][u32 長さ(ビッグ エンディアン)][中身] */
+static BOOL fx_message(void)
+{
+    BYTE     h[7], *p;
+    unsigned len;
+    if (!rd(h, 7)) return FALSE;
+    len = ((unsigned)h[3] << 24) | ((unsigned)h[4] << 16) | ((unsigned)h[5] << 8) | h[6];
+    if (len > FX_MAX) { set_error(L"ファイルの受け渡しのメッセージが大きすぎます。"); return FALSE; }
+    p = (BYTE *)malloc(len ? len : 1);
+    if (!p || !rd(p, (int)len)) { free(p); return FALSE; }
+    switch (h[0]) {
+    case FX_HELLO:
+        InterlockedExchange(&g_fxOK, len >= 4 && (p[0] & 1));
+        log_printf(L"ファイルのコピー＆貼り付け: %s", g_fxOK ? L"使える" : L"相手が見るだけにしているので使わない");
+        if (g_fxOffer && fx_usable()) PostMessageW(g_notify, WM_APP_FXOFFER, 0, 0);
+        break;
+    case FX_FILES: if (fx_usable()) fx_offer_received(g_connGen, p, (int)len); break;
+    case FX_READ:  if (fx_usable()) fx_request(g_connGen, p, (int)len); break;
+    case FX_DATA:  fx_deliver(g_connGen, p, (int)len); break;
+    }
+    free(p);
+    return TRUE;
+}
+
 static BOOL message_loop(void)
 {
     for (;;) {
@@ -626,6 +687,9 @@ static BOOL message_loop(void)
             if (!server_cut_text()) return FALSE;
             break;
         case 150:                       /* EndOfContinuousUpdates */
+            break;
+        case FX_MSG:                    /* ファイルのコピー＆貼り付け(iivnc どうし) */
+            if (!fx_message()) return FALSE;
             break;
         case 248: {                     /* ServerFence: 求められたら返す */
             BYTE h[8], payload[64], m[73];
@@ -751,6 +815,8 @@ static DWORD WINAPI conn_thread(void *arg)
             PostMessageW(g_notify, WM_APP_CONNECTED, 0, 0);
             message_loop();
             InterlockedExchange(&g_active, 0);
+            InterlockedExchange(&g_fxOK, 0);
+            fx_conn_closed(g_connGen);
             jpeg_wait_all();
         }
     }
@@ -786,6 +852,8 @@ void conn_start(const ConnParams *p, HWND notify)
     g_err[0] = 0;
     g_authFailed = g_needPw = FALSE;
     g_qemuOk = 0;
+    InterlockedIncrement(&g_connGen);
+    InterlockedExchange(&g_fxOK, 0);
     g_extClip = 0;
     g_clipPeer = 0;
     g_rbPos = g_rbLen = 0;
