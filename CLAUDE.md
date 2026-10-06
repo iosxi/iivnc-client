@@ -74,6 +74,24 @@ WSL の AlmaLinux-9 に**何も入れずに**動かした(2026-10-04)。
 - Python は DPI 非対応なので、ほかの窓の大きさを GetClientRect で聞くと拡大率で割った値が返る
   (クライアントの窓 1920×1080 が 1536×864)。
 
+### ほかのビューアとの比べ合いと高速化(2026-10-06、client v10 / server v8)
+
+- `python tools/viewercmp.py [--quality high|lossless] [iivnc-gdi iivnc-gpu ultravnc tightvnc]`。サーバーは
+  127.0.0.1:5998・パスワード `bench`・`-testsrc video -testfps 0`。数えるのはサーバーのログの 5 秒ごとの回/秒と、
+  ビューアのプロセスの CPU 時間・専用メモリ。**UltraVNC のビューアは、認証の無いサーバーには「信用するか」の確認を
+  出して止まる**ので、パスワードを付ける。他社のビューアは画質の段階 8(iivnc-server では JPEG 92・4:4:4)。
+- スレッドごとの CPU を見ると(QueryThreadCycleTime と開始アドレス)、高画質ではほぼ全部が JPEG の作業スレッド(WIC)。
+  WIC は libjpeg-turbo(PIL)と同じくらい速いので替えていない。
+- GPU 描画のとき `nvwgf2umx.dll` のスレッドが 676M サイクル/秒使っていた。受け渡し用のテクスチャを `Map(WRITE)` すると、
+  GPU がまだそこから写している間ドライバが CPU を回して待つ(1 回 3〜9M サイクル)。コピーの後にフェンス
+  (`ID3D11DeviceContext4::Signal`)を打ち、次に同じテクスチャを使う前に、まだなら `SetEventOnCompletion` で眠って待つ。
+  `Map` は 0.1M サイクルに、ドライバのスレッドは 164M に、全体で約 1 割減。更新の回数は落ちなかった(サーバーの
+  取り込みでは落ちたので、サーバーには入れていない)。D3D11.4 が無ければ今までどおり。
+- 劣化なしでは通信のスレッド 1 本が zlib の展開をする。zinflate.c に速い道を足して 31 → 37 回/秒。その後の律速は
+  受信待ち(通信のスレッドは 6 割しか働いていない)。
+- `rendercheck.py` の「中心のマウスの行き先」が NG になったのは、`PickerHost.exe` の `Shell_SystemDim`(画面全体を
+  覆う窓)が出ていたため。変更前の exe でも同じ NG だった。
+
 ### メモリが多すぎる、という報告(2026-10-04、v3)
 
 相手が 4K(3840×2160)、`iivnc-server -dryrun` の画面に 12 秒つないだときのクライアント:

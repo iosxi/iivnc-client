@@ -29,6 +29,7 @@
 #include "iivncc.h"
 #include "resource.h"
 #include <d3d11.h>
+#include <d3d11_4.h>
 #include <dxgi1_5.h>
 #include <imm.h>
 #include <shellapi.h>
@@ -62,6 +63,10 @@ static ID3D11Texture2D          *g_tex;
 static ID3D11Texture2D          *g_stage[2];   /* CPU から書く送り出し用(STAGE_SIZE 四方、交互に使う) */
 static int                       g_stageNext;
 #define STAGE_SIZE 1024
+static ID3D11DeviceContext4     *g_ctx4;        /* 送り出し用を GPU が読み終えたかをフェンスで知る */
+static ID3D11Fence              *g_fence;
+static HANDLE                    g_fenceEv;
+static UINT64                    g_fenceVal, g_stageFence[2];
 static ID3D11ShaderResourceView *g_srv;
 static ID3D11VertexShader       *g_vs;
 static ID3D11PixelShader        *g_ps;
@@ -127,6 +132,10 @@ static void d3d_release(void)
     SAFE_RELEASE(g_tex, ID3D11Texture2D);
     SAFE_RELEASE(g_stage[0], ID3D11Texture2D);
     SAFE_RELEASE(g_stage[1], ID3D11Texture2D);
+    SAFE_RELEASE(g_fence, ID3D11Fence);
+    SAFE_RELEASE(g_ctx4, ID3D11DeviceContext4);
+    if (g_fenceEv) { CloseHandle(g_fenceEv); g_fenceEv = NULL; }
+    g_fenceVal = g_stageFence[0] = g_stageFence[1] = 0;
     SAFE_RELEASE(g_sampLinear, ID3D11SamplerState);
     SAFE_RELEASE(g_sampPoint, ID3D11SamplerState);
     SAFE_RELEASE(g_vs, ID3D11VertexShader);
@@ -234,6 +243,21 @@ static BOOL d3d_init(HWND hwnd)
     smp.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
     smp.MaxLOD = 0;
     ID3D11Device_CreateSamplerState(g_dev, &smp, &g_sampPoint);
+    /* 送り出し用を GPU がまだ読んでいる間に Map すると、ドライバが待つ間ずっと CPU を回す
+       (1 回 3〜9M サイクル。2026-10-06 実測、RTX 3070 Ti)。フェンスで読み終わりを知り、
+       まだならイベントで眠って待つ。D3D11.4(Windows 10 1703 以降)が無ければ今までどおり。 */
+    {
+        ID3D11Device5 *dev5 = NULL;
+        if (SUCCEEDED(ID3D11Device_QueryInterface(g_dev, &IID_ID3D11Device5, (void **)&dev5))) {
+            if (FAILED(ID3D11DeviceContext_QueryInterface(g_ctx, &IID_ID3D11DeviceContext4, (void **)&g_ctx4)) ||
+                FAILED(ID3D11Device5_CreateFence(dev5, 0, D3D11_FENCE_FLAG_NONE, &IID_ID3D11Fence, (void **)&g_fence)) ||
+                !(g_fenceEv = CreateEventW(NULL, FALSE, FALSE, NULL))) {
+                SAFE_RELEASE(g_fence, ID3D11Fence);
+                SAFE_RELEASE(g_ctx4, ID3D11DeviceContext4);
+            }
+            ID3D11Device5_Release(dev5);
+        }
+    }
     IDXGIFactory2_Release(fac);
     IDXGIAdapter_Release(ad);
     IDXGIDevice_Release(dd);
@@ -350,10 +374,16 @@ static void d3d_upload(RECT r)
     for (ty = r.top; ty < r.bottom; ty += STAGE_SIZE)
         for (tx = r.left; tx < r.right; tx += STAGE_SIZE) {
             int tw = min(STAGE_SIZE, (int)r.right - tx), th = min(STAGE_SIZE, (int)r.bottom - ty), y;
-            ID3D11Texture2D *st = g_stage[g_stageNext];
+            int si = g_stageNext;
+            ID3D11Texture2D *st = g_stage[si];
             D3D11_MAPPED_SUBRESOURCE m;
             D3D11_BOX box;
             g_stageNext ^= 1;
+            if (g_fence && st && ID3D11Fence_GetCompletedValue(g_fence) < g_stageFence[si] &&
+                SUCCEEDED(ID3D11Fence_SetEventOnCompletion(g_fence, g_stageFence[si], g_fenceEv))) {
+                ID3D11DeviceContext_Flush(g_ctx);
+                WaitForSingleObject(g_fenceEv, 500);
+            }
             if (!st || FAILED(ID3D11DeviceContext_Map(g_ctx, (ID3D11Resource *)st, 0, D3D11_MAP_WRITE, 0, &m))) continue;
             AcquireSRWLockShared(&g_rm.lock);
             if (g_rm.w == w && g_rm.h == h)
@@ -364,6 +394,8 @@ static void d3d_upload(RECT r)
             box.left = 0; box.top = 0; box.front = 0; box.right = (UINT)tw; box.bottom = (UINT)th; box.back = 1;
             ID3D11DeviceContext_CopySubresourceRegion(g_ctx, (ID3D11Resource *)g_tex, 0, (UINT)tx, (UINT)ty, 0,
                                                       (ID3D11Resource *)st, 0, &box);
+            if (g_fence && SUCCEEDED(ID3D11DeviceContext4_Signal(g_ctx4, g_fence, g_fenceVal + 1)))
+                g_stageFence[si] = ++g_fenceVal;
         }
     if (g_scale < 1.0 && g_srv) ID3D11DeviceContext_GenerateMips(g_ctx, g_srv);
 }

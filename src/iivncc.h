@@ -35,7 +35,7 @@
 #include "zlite.h"
 
 #define APP_NAME      L"iivnc-client"
-#define APP_VERSION   L"1.8.0"
+#define APP_VERSION   L"1.9.0"
 
 #define WM_APP_CONNECTED  (WM_APP + 1)  /* 初期化まで済んだ */
 #define WM_APP_FRAME      (WM_APP + 2)  /* 更新を 1 回受け終えた */
